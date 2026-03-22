@@ -103,7 +103,7 @@ async def anthropic_streaming_wrapper(
                             "usage": usage_dict,
                         },
                     }
-                    yield f"event: message_start\ndata: {json.dumps(message_start)}\n\n"
+                    yield f"event: message_start\ndata: {json.dumps(message_start, ensure_ascii=False)}\n\n"
                     message_started = True
 
                 # Close any open thinking block
@@ -134,7 +134,7 @@ async def anthropic_streaming_wrapper(
                     final_usage["cache_creation_input_tokens"] = 0
 
                 # Send message_delta with final info
-                yield f'event: message_delta\ndata: {{"type": "message_delta", "delta": {{"stop_reason": "{stop_reason}", "stop_sequence": null}}, "usage": {json.dumps(final_usage)}}}\n\n'
+                yield f'event: message_delta\ndata: {{"type": "message_delta", "delta": {{"stop_reason": "{stop_reason}", "stop_sequence": null}}, "usage": {json.dumps(final_usage, ensure_ascii=False)}}}\n\n'
 
                 # Send message_stop
                 yield 'event: message_stop\ndata: {"type": "message_stop"}\n\n'
@@ -242,7 +242,7 @@ async def anthropic_streaming_wrapper(
                         "usage": usage_dict,
                     },
                 }
-                yield f"event: message_start\ndata: {json.dumps(message_start)}\n\n"
+                yield f"event: message_start\ndata: {json.dumps(message_start, ensure_ascii=False)}\n\n"
                 message_started = True
 
             choices = chunk.get("choices") or []
@@ -261,7 +261,7 @@ async def anthropic_streaming_wrapper(
                         "index": current_block_index,
                         "content_block": {"type": "thinking", "thinking": ""},
                     }
-                    yield f"event: content_block_start\ndata: {json.dumps(block_start)}\n\n"
+                    yield f"event: content_block_start\ndata: {json.dumps(block_start, ensure_ascii=False)}\n\n"
                     thinking_block_started = True
 
                 # Send thinking delta
@@ -270,7 +270,7 @@ async def anthropic_streaming_wrapper(
                     "index": current_block_index,
                     "delta": {"type": "thinking_delta", "thinking": reasoning_content},
                 }
-                yield f"event: content_block_delta\ndata: {json.dumps(block_delta)}\n\n"
+                yield f"event: content_block_delta\ndata: {json.dumps(block_delta, ensure_ascii=False)}\n\n"
                 # Accumulate thinking for logging
                 accumulated_thinking += reasoning_content
 
@@ -290,7 +290,7 @@ async def anthropic_streaming_wrapper(
                         "index": current_block_index,
                         "content_block": {"type": "text", "text": ""},
                     }
-                    yield f"event: content_block_start\ndata: {json.dumps(block_start)}\n\n"
+                    yield f"event: content_block_start\ndata: {json.dumps(block_start, ensure_ascii=False)}\n\n"
                     content_block_started = True
 
                 # Send content delta
@@ -299,7 +299,7 @@ async def anthropic_streaming_wrapper(
                     "index": current_block_index,
                     "delta": {"type": "text_delta", "text": content},
                 }
-                yield f"event: content_block_delta\ndata: {json.dumps(block_delta)}\n\n"
+                yield f"event: content_block_delta\ndata: {json.dumps(block_delta, ensure_ascii=False)}\n\n"
                 # Accumulate text for logging
                 accumulated_text += content
 
@@ -341,7 +341,7 @@ async def anthropic_streaming_wrapper(
                             "input": {},
                         },
                     }
-                    yield f"event: content_block_start\ndata: {json.dumps(block_start)}\n\n"
+                    yield f"event: content_block_start\ndata: {json.dumps(block_start, ensure_ascii=False)}\n\n"
                     # Increment for the next block
                     current_block_index += 1
 
@@ -361,7 +361,7 @@ async def anthropic_streaming_wrapper(
                             "partial_json": func["arguments"],
                         },
                     }
-                    yield f"event: content_block_delta\ndata: {json.dumps(block_delta)}\n\n"
+                    yield f"event: content_block_delta\ndata: {json.dumps(block_delta, ensure_ascii=False)}\n\n"
 
             # Note: We intentionally ignore finish_reason here.
             # Block closing is handled when we receive [DONE] to avoid
@@ -395,7 +395,7 @@ async def anthropic_streaming_wrapper(
                     "usage": usage_dict,
                 },
             }
-            yield f"event: message_start\ndata: {json.dumps(message_start)}\n\n"
+            yield f"event: message_start\ndata: {json.dumps(message_start, ensure_ascii=False)}\n\n"
 
         # Send the error as a text content block so it's visible to the user
         error_message = f"Error: {str(e)}"
@@ -404,14 +404,14 @@ async def anthropic_streaming_wrapper(
             "index": current_block_index,
             "content_block": {"type": "text", "text": ""},
         }
-        yield f"event: content_block_start\ndata: {json.dumps(error_block_start)}\n\n"
+        yield f"event: content_block_start\ndata: {json.dumps(error_block_start, ensure_ascii=False)}\n\n"
 
         error_block_delta = {
             "type": "content_block_delta",
             "index": current_block_index,
             "delta": {"type": "text_delta", "text": error_message},
         }
-        yield f"event: content_block_delta\ndata: {json.dumps(error_block_delta)}\n\n"
+        yield f"event: content_block_delta\ndata: {json.dumps(error_block_delta, ensure_ascii=False)}\n\n"
 
         yield f'event: content_block_stop\ndata: {{"type": "content_block_stop", "index": {current_block_index}}}\n\n'
 
@@ -422,7 +422,7 @@ async def anthropic_streaming_wrapper(
             final_usage["cache_creation_input_tokens"] = 0
 
         # Send message_delta and message_stop to properly close the stream
-        yield f'event: message_delta\ndata: {{"type": "message_delta", "delta": {{"stop_reason": "end_turn", "stop_sequence": null}}, "usage": {json.dumps(final_usage)}}}\n\n'
+        yield f'event: message_delta\ndata: {{"type": "message_delta", "delta": {{"stop_reason": "end_turn", "stop_sequence": null}}, "usage": {json.dumps(final_usage, ensure_ascii=False)}}}\n\n'
         yield 'event: message_stop\ndata: {"type": "message_stop"}\n\n'
 
         # Also send the formal error event for clients that handle it
@@ -430,4 +430,4 @@ async def anthropic_streaming_wrapper(
             "type": "error",
             "error": {"type": "api_error", "message": str(e)},
         }
-        yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
+        yield f"event: error\ndata: {json.dumps(error_event, ensure_ascii=False)}\n\n"
