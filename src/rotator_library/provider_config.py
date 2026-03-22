@@ -651,6 +651,7 @@ class ProviderConfig:
     def __init__(self):
         self._api_bases: Dict[str, str] = {}
         self._custom_providers: Set[str] = set()
+        self._protocol_overrides: Dict[str, str] = {}
         self._load_api_bases()
 
     def _load_api_bases(self) -> None:
@@ -675,6 +676,20 @@ class ProviderConfig:
                 else:
                     lib_logger.info(
                         f"Detected API base override for {provider}: {value}"
+                    )
+
+        for key, value in os.environ.items():
+            if key.endswith("_PROTOCOL") and value:
+                provider = key[:-9].lower()  # Remove _PROTOCOL
+                protocol = value.lower().strip()
+                if protocol in ("anthropic", "openai"):
+                    self._protocol_overrides[provider] = protocol
+                    lib_logger.info(
+                        f"Detected protocol override for {provider}: {protocol}"
+                    )
+                else:
+                    lib_logger.warning(
+                        f"Unsupported protocol '{value}' for {provider}, ignoring. Supported: anthropic, openai"
                     )
 
     def is_known_provider(self, provider: str) -> bool:
@@ -730,13 +745,14 @@ class ProviderConfig:
                 f"Applying api_base override for known provider {provider}: {api_base}"
             )
         else:
-            # Custom provider - route through OpenAI-compatible endpoint
+            # Custom provider - check for protocol override
             model_name = model.split("/", 1)[1] if "/" in model else model
-            kwargs["model"] = f"openai/{model_name}"
+            protocol = self._protocol_overrides.get(provider, "openai")
+            kwargs["model"] = f"{protocol}/{model_name}"
             kwargs["api_base"] = api_base
-            kwargs["custom_llm_provider"] = "openai"
+            kwargs["custom_llm_provider"] = protocol
             lib_logger.debug(
-                f"Routing custom provider {provider} through openai: "
+                f"Routing custom provider {provider} through {protocol}: "
                 f"model={kwargs['model']}, api_base={api_base}"
             )
 
