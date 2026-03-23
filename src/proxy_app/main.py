@@ -84,10 +84,19 @@ if _env_files_found:
     _env_names = [_ef.name for _ef in _env_files_found]
     print(f"📁 Loaded {len(_env_files_found)} .env file(s): {', '.join(_env_names)}")
 
-# Get proxy API key for display
-proxy_api_key = os.getenv("PROXY_API_KEY")
-if proxy_api_key:
-    key_display = f"✓ {proxy_api_key}"
+# Get proxy API keys for display (support multiple keys)
+_proxy_keys_display = []
+_single = os.getenv("PROXY_API_KEY")
+if _single:
+    _proxy_keys_display.append(_single)
+for _i in range(1, 100):
+    _k = os.getenv(f"PROXY_API_KEY_{_i}")
+    if _k:
+        _proxy_keys_display.append(_k)
+    else:
+        break
+if _proxy_keys_display:
+    key_display = f"✓ {len(_proxy_keys_display)} key(s) configured"
 else:
     key_display = "✗ Not Set (INSECURE - anyone can access!)"
 
@@ -361,7 +370,19 @@ if ENABLE_REQUEST_LOGGING:
     )
 if ENABLE_RAW_LOGGING:
     logging.info("Raw I/O logging is enabled (proxy boundary, unmodified HTTP data).")
-PROXY_API_KEY = os.getenv("PROXY_API_KEY")
+# Support multiple proxy API keys: PROXY_API_KEY, PROXY_API_KEY_1, PROXY_API_KEY_2, ...
+_proxy_api_keys: set = set()
+_pk_single = os.getenv("PROXY_API_KEY")
+if _pk_single:
+    _proxy_api_keys.add(_pk_single)
+for _i in range(1, 100):
+    _pk = os.getenv(f"PROXY_API_KEY_{_i}")
+    if _pk:
+        _proxy_api_keys.add(_pk)
+    else:
+        break
+PROXY_API_KEY = _pk_single
+PROXY_API_KEYS: set = _proxy_api_keys
 # Note: PROXY_API_KEY validation moved to server startup to allow credential tool to run first
 
 # Discover API keys from environment variables
@@ -683,12 +704,13 @@ def get_embedding_batcher(request: Request) -> EmbeddingBatcher:
 
 async def verify_api_key(auth: str = Depends(api_key_header)):
     """Dependency to verify the proxy API key."""
-    # If PROXY_API_KEY is not set or empty, skip verification (open access)
-    if not PROXY_API_KEY:
+    if not PROXY_API_KEYS:
         return auth
-    if not auth or auth != f"Bearer {PROXY_API_KEY}":
-        raise HTTPException(status_code=401, detail="Invalid or missing API Key")
-    return auth
+    if auth and auth.startswith("Bearer "):
+        token = auth[7:]
+        if token in PROXY_API_KEYS:
+            return auth
+    raise HTTPException(status_code=401, detail="Invalid or missing API Key")
 
 
 # --- Anthropic API Key Header ---
@@ -703,11 +725,11 @@ async def verify_anthropic_api_key(
     Dependency to verify API key for Anthropic endpoints.
     Accepts either x-api-key header (Anthropic style) or Authorization Bearer (OpenAI style).
     """
-    # Check x-api-key first (Anthropic style)
-    if x_api_key and x_api_key == PROXY_API_KEY:
+    if not PROXY_API_KEYS:
+        return x_api_key or auth
+    if x_api_key and x_api_key in PROXY_API_KEYS:
         return x_api_key
-    # Fall back to Bearer token (OpenAI style)
-    if auth and auth == f"Bearer {PROXY_API_KEY}":
+    if auth and auth.startswith("Bearer ") and auth[7:] in PROXY_API_KEYS:
         return auth
     raise HTTPException(status_code=401, detail="Invalid or missing API Key")
 
