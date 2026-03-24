@@ -25,3 +25,6 @@ customtkinter
 
 # For building the executable
 pyinstaller
+
+# Optional: Redis client for distributed deployment (required only when REDIS_URL is set)
+# redis

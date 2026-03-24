@@ -17,6 +17,7 @@ from .error_handler import ClassifiedError, NoAvailableKeysError, mask_credentia
 from .providers import PROVIDER_PLUGINS
 from .utils.resilient_io import ResilientStateWriter
 from .utils.paths import get_data_file
+from .distributed import RedisBackend
 from .config import (
     DEFAULT_FAIR_CYCLE_DURATION,
     DEFAULT_EXHAUSTION_COOLDOWN_THRESHOLD,
@@ -85,6 +86,7 @@ class UsageManager:
         custom_caps: Optional[
             Dict[str, Dict[Union[int, Tuple[int, ...], str], Dict[str, Dict[str, Any]]]]
         ] = None,
+        redis_backend: Optional["RedisBackend"] = None,
     ):
         """
         Initialize the UsageManager.
@@ -161,6 +163,8 @@ class UsageManager:
 
         self._timeout_lock = asyncio.Lock()
         self._claimed_on_timeout: Set[str] = set()
+
+        self._redis: Optional[RedisBackend] = redis_backend
 
         # Resilient writer for usage data persistence
         self._state_writer = ResilientStateWriter(file_path, lib_logger)
@@ -1531,23 +1535,31 @@ class UsageManager:
             for key in credentials:
                 key_data = self._usage_data.get(key, {})
 
-                # Skip if key-level cooldown is active
+                # Skip if key-level cooldown is active (local or Redis)
                 if (key_data.get("key_cooldown_until") or 0) > now:
                     continue
 
                 # Normalize model name for consistent cooldown lookup
-                # (cooldowns are stored under normalized names by record_failure)
-                # For providers without normalize_model_for_tracking (non-Antigravity),
-                # this returns the model unchanged, so cooldown lookups work as before.
                 normalized_model = self._normalize_model(key, model)
 
-                # Skip if model-specific cooldown is active
+                # Skip if model-specific cooldown is active (local or Redis)
                 if (
                     key_data.get("model_cooldowns", {}).get(normalized_model) or 0
                 ) > now:
                     continue
 
                 available.append(key)
+
+        if self._redis_available():
+            filtered = []
+            for key in available:
+                normalized_model = self._normalize_model(key, model)
+                if await self._redis_is_on_cooldown(key, None):
+                    continue
+                if await self._redis_is_on_cooldown(key, normalized_model):
+                    continue
+                filtered.append(key)
+            return filtered
 
         return available
 
@@ -2090,6 +2102,35 @@ class UsageManager:
                 )
         else:
             data["key_cooldown_until"] = None
+
+    def set_redis_backend(self, redis_backend: "RedisBackend"):
+        self._redis = redis_backend
+
+    def _redis_available(self) -> bool:
+        return self._redis is not None and self._redis.available
+
+    async def _redis_set_cooldown(self, key: str, model: Optional[str], until_ts: float):
+        if not self._redis_available():
+            return
+        try:
+            ttl = max(1, int(until_ts - time.time()))
+            if model:
+                await self._redis.set_cooldown("key_model", f"{key}:{model}", ttl)
+            else:
+                await self._redis.set_cooldown("key", key, ttl)
+        except Exception:
+            pass
+
+    async def _redis_is_on_cooldown(self, key: str, model: Optional[str]) -> bool:
+        if not self._redis_available():
+            return False
+        try:
+            if model:
+                return await self._redis.is_cooling_down("key_model", f"{key}:{model}")
+            else:
+                return await self._redis.is_cooling_down("key", key)
+        except Exception:
+            return False
 
     def _initialize_key_states(self, keys: List[str]):
         """Initializes state tracking for all provided keys if not already present."""
@@ -3172,6 +3213,14 @@ class UsageManager:
             # Check for key-level lockout condition
             await self._check_key_lockout(key, key_data)
 
+            # Sync cooldowns to Redis for distributed coordination
+            model_cd = model_cooldowns.get(model)
+            if model_cd:
+                await self._redis_set_cooldown(key, model, model_cd)
+            key_cd = key_data.get("key_cooldown_until")
+            if key_cd:
+                await self._redis_set_cooldown(key, None, key_cd)
+
             # Track failure count for quota estimation (all failures consume quota)
             # This is separate from consecutive_failures which is for backoff logic
             if reset_mode == "per_model":
@@ -3382,6 +3431,7 @@ class UsageManager:
                 )
                 if should_update:
                     model_cooldowns[model] = reset_timestamp
+                    await self._redis_set_cooldown(credential, model, reset_timestamp)
                     hours_until_reset = (reset_timestamp - now_ts) / 3600
                     # Determine group or model name for logging
                     group = self._get_model_quota_group(credential, model)

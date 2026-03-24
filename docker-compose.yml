@@ -1,4 +1,12 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: llm-proxy-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
   llm-proxy:
     image: ghcr.io/mirrowel/llm-api-key-proxy:latest
     container_name: llm-api-proxy
@@ -21,8 +29,15 @@ services:
       - ./key_usage.json:/app/key_usage.json
       # Optionally mount additional .env files (e.g., combined credential files)
       # - ./antigravity_all_combined.env:/app/antigravity_all_combined.env:ro
+    depends_on:
+      - redis
     environment:
       # Skip OAuth interactive initialization in container (non-interactive)
       - SKIP_OAUTH_INIT_CHECK=true
       # Ensure Python output is not buffered
       - PYTHONUNBUFFERED=1
+      # Redis for distributed cooldown/concurrent state (optional)
+      - REDIS_URL=redis://redis:6379/0
+
+volumes:
+  redis_data:

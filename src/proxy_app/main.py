@@ -632,6 +632,22 @@ async def lifespan(app: FastAPI):
     client.background_refresher.start()  # Start the background task
     app.state.rotating_client = client
 
+    redis_url = os.getenv("REDIS_URL")
+    if redis_url:
+        from rotator_library.distributed import RedisBackend
+        _redis = RedisBackend(redis_url)
+        ok = await _redis.connect()
+        if ok:
+            client.usage_manager.set_redis_backend(_redis)
+            client.cooldown_manager.set_redis_backend(_redis)
+            app.state.redis_backend = _redis
+            logging.info(f"Redis backend connected: {redis_url}")
+        else:
+            app.state.redis_backend = None
+            logging.warning("Redis URL set but connection failed; running without Redis.")
+    else:
+        app.state.redis_backend = None
+
     # Warn if no provider credentials are configured
     if not client.all_credentials:
         logging.warning("=" * 70)
